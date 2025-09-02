@@ -354,6 +354,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                             child: NotificationCard(
                               notification: n,
                               onMarkRead: _markAsRead,
+                              onDelete: _deleteNotification,
                             ),
                           );
                         },
