@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../screen/bloc/notification_repository.dart';
 import '../model/notification_model.dart';
-
-enum SnackType { success, error, info }
+import '../utils/snack_helper.dart';
+import '../widgets/notification_card.dart';
+import '../widgets/search_bar.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -59,7 +60,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
     });
 
     // show modern snack with UNDO
-    _showSnack(
+    showAppSnack(
+      context,
       'Marked as read',
       type: SnackType.success,
       actionLabel: 'UNDO',
@@ -82,7 +84,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         final pos = _notifications.indexWhere((n) => n.id == id);
         if (pos != -1) _notifications[pos] = original;
       });
-      _showSnack('Failed to mark as read', type: SnackType.error);
+      showAppSnack(context, 'Failed to mark as read', type: SnackType.error);
     }
   }
 
@@ -97,7 +99,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
           .toList();
     });
 
-    _showSnack(
+    showAppSnack(
+      context,
       'All notifications marked as read',
       type: SnackType.success,
       actionLabel: 'UNDO',
@@ -121,7 +124,11 @@ class _NotificationScreenState extends State<NotificationScreen> {
         // restore previous state if needed
         _notifications = previous;
       });
-      _showSnack('Failed to mark all as read', type: SnackType.error);
+      showAppSnack(
+        context,
+        'Failed to mark all as read',
+        type: SnackType.error,
+      );
     }
   }
 
@@ -144,7 +151,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
       _notifications.removeWhere((n) => n.id == id);
     });
 
-    _showSnack(
+    showAppSnack(
+      context,
       'Deleted',
       type: SnackType.success,
       actionLabel: 'UNDO',
@@ -166,63 +174,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
           _notifications.insert(0, removed);
         }
       });
-      _showSnack('Failed to delete notification', type: SnackType.error);
+      showAppSnack(
+        context,
+        'Failed to delete notification',
+        type: SnackType.error,
+      );
     }
   }
 
-  // small, modern snackbar helper used across the screen
-  // shows floating snack with icon, optional action, and consistent styling
-  void _showSnack(
-    String message, {
-    SnackType type = SnackType.info,
-    String? actionLabel,
-    VoidCallback? onAction,
-    Duration? duration,
-  }) {
-    if (!mounted) return;
-    final color = {
-      SnackType.success: Colors.green[600],
-      SnackType.error: Colors.redAccent[700],
-      SnackType.info: Colors.grey[850],
-    }[type]!;
-    final icon = {
-      SnackType.success: Icons.check_circle_outline,
-      SnackType.error: Icons.error_outline,
-      SnackType.info: Icons.info_outline,
-    }[type]!;
-
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        elevation: 6,
-        duration: duration ?? const Duration(seconds: 3),
-        backgroundColor: color,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Row(
-          children: [
-            Icon(icon, color: Colors.white70),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(message, style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-        action: actionLabel != null
-            ? SnackBarAction(
-                label: actionLabel,
-                textColor: Colors.white,
-                onPressed: onAction ?? () {},
-              )
-            : null,
-      ),
-    );
-  }
-
   // simple snack types for consistent appearances
-  // placed here to keep the helper private to the screen
-  // (could be moved to a shared util if reused across app)
+  // (SnackType is provided by snack_helper)
   List<NotificationModel> get _filtered {
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return _notifications;
@@ -230,141 +191,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
       return n.title.toLowerCase().contains(q) ||
           n.body.toLowerCase().contains(q);
     }).toList();
-  }
-
-  Widget _buildCard(NotificationModel n) {
-    final avatarColor =
-        Colors.primaries[n.userId % Colors.primaries.length].shade400;
-    return Dismissible(
-      key: ValueKey('notif-${n.id}'),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.redAccent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        child: const Icon(Icons.delete_outline, color: Colors.white),
-      ),
-      onDismissed: (_) => _deleteNotification(n.id),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 280),
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: n.isRead ? Colors.white : Colors.blue.shade50,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(10),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () => _markAsRead(n.id),
-            child: Padding(
-              padding: const EdgeInsets.all(14.0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: avatarColor,
-                    child: Text(
-                      (n.title.isNotEmpty ? n.title[0] : '?').toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                n.title,
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: n.isRead
-                                      ? FontWeight.w600
-                                      : FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              n.date,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          n.body,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.grey[800],
-                            height: 1.3,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            if (!n.isRead)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.deepPurpleAccent,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Text(
-                                  'NEW',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            const Spacer(),
-                            IconButton(
-                              onPressed: () => _markAsRead(n.id),
-                              icon: Icon(
-                                Icons.mark_email_read_outlined,
-                                color: Colors.grey[600],
-                              ),
-                              tooltip: 'Mark read',
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   @override
@@ -388,55 +214,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(52),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 40,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, color: Colors.grey),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            decoration: const InputDecoration.collapsed(
-                              hintText: 'Search notifications',
-                            ),
-                            onChanged: (v) => setState(() => _query = v),
-                          ),
-                        ),
-                        if (_query.isNotEmpty)
-                          GestureDetector(
-                            onTap: () => setState(() => _query = ''),
-                            child: const Icon(Icons.close, color: Colors.grey),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: _refresh,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.secondary.withAlpha(31),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.refresh),
-                  ),
-                ),
-              ],
-            ),
+          child: AppSearchBar(
+            query: _query,
+            onChanged: (v) => setState(() => _query = v),
+            onRefresh: _refresh,
           ),
         ),
       ),
@@ -528,7 +309,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
                         itemCount: filtered.length + 1,
                         itemBuilder: (context, index) {
                           if (index == 0) {
-                            // header with counts
                             return Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
@@ -551,7 +331,31 @@ class _NotificationScreenState extends State<NotificationScreen> {
                             );
                           }
                           final n = filtered[index - 1];
-                          return _buildCard(n);
+                          return Dismissible(
+                            key: ValueKey('notif-${n.id}'),
+                            direction: DismissDirection.endToStart,
+                            background: Container(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 20),
+                              child: const Icon(
+                                Icons.delete_outline,
+                                color: Colors.white,
+                              ),
+                            ),
+                            onDismissed: (_) => _deleteNotification(n.id),
+                            child: NotificationCard(
+                              notification: n,
+                              onMarkRead: _markAsRead,
+                            ),
+                          );
                         },
                       ),
               ),
