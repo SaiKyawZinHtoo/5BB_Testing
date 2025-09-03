@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../model/notification_model.dart';
@@ -15,34 +16,109 @@ class NotificationRepository {
 
   Future<List<NotificationModel>> fetchNotifications() async {
     final uri = Uri.parse('$_kApiBaseUrl$_kPostsEndpoint');
-    try {
-      final response = await _client.get(uri).timeout(_kTimeout);
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data
-            .map((e) => NotificationModel.fromJson(e as Map<String, dynamic>))
-            .toList();
+    debugPrint('NotificationRepository: fetchNotifications() -> $uri');
+
+    // Use a browser-like User-Agent and Accept header. Some servers
+    // block unknown clients or return different responses based on headers.
+    final headers = {
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+      'Accept': 'application/json',
+    };
+
+    const int maxAttempts = 3;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        final response = await _client
+            .get(uri, headers: headers)
+            .timeout(_kTimeout);
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body);
+          debugPrint(
+            'NotificationRepository: fetched ${data.length} items from API',
+          );
+          return data
+              .map((e) => NotificationModel.fromJson(e as Map<String, dynamic>))
+              .toList();
+        }
+
+        final msg = 'Failed to fetch notifications: ${response.statusCode}';
+        debugPrint(
+          'NotificationRepository: $msg (attempt ${attempt + 1}/$maxAttempts)',
+        );
+        // If last attempt, throw to trigger fallback below.
+        if (attempt == maxAttempts - 1) throw Exception(msg);
+      } catch (e) {
+        debugPrint('NotificationRepository: attempt ${attempt + 1} failed: $e');
+        if (attempt < maxAttempts - 1) {
+          final waitMs = 300 * (1 << attempt); // 300ms, 600ms, ...
+          await Future.delayed(Duration(milliseconds: waitMs));
+          continue;
+        }
+        // final failure -> fall back to static data
+        debugPrint(
+          'NotificationRepository: fetchNotifications failed, falling back to static data. Error: $e',
+        );
+        final fallback = await getStaticNotifications();
+        debugPrint(
+          'NotificationRepository: returning ${fallback.length} static notifications',
+        );
+        return fallback;
       }
-      throw Exception('Failed to fetch notifications: ${response.statusCode}');
-    } catch (e) {
-      // On any error, return static fallback data
-      return getStaticNotifications();
     }
+
+    // Shouldn't reach here, but return static data defensively.
+    final fallback = await getStaticNotifications();
+    debugPrint(
+      'NotificationRepository: returning ${fallback.length} static notifications',
+    );
+    return fallback;
   }
 
   Future<NotificationModel?> fetchNotificationById(int id) async {
     final uri = Uri.parse('$_kApiBaseUrl$_kPostsEndpoint/$id');
-    try {
-      final response = await _client.get(uri).timeout(_kTimeout);
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        return NotificationModel.fromJson(data);
+    debugPrint('NotificationRepository: fetchNotificationById($id) -> $uri');
+
+    final headers = {
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+      'Accept': 'application/json',
+    };
+
+    const int maxAttempts = 3;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        final response = await _client
+            .get(uri, headers: headers)
+            .timeout(_kTimeout);
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> data = json.decode(response.body);
+          debugPrint('NotificationRepository: fetched notification id=$id');
+          return NotificationModel.fromJson(data);
+        }
+        if (response.statusCode == 404) {
+          debugPrint(
+            'NotificationRepository: notification id=$id not found (404)',
+          );
+          return null;
+        }
+        final msg = 'Failed to fetch notification: ${response.statusCode}';
+        debugPrint(
+          'NotificationRepository: $msg (attempt ${attempt + 1}/$maxAttempts)',
+        );
+        if (attempt == maxAttempts - 1) throw Exception(msg);
+      } catch (e) {
+        debugPrint(
+          'NotificationRepository: fetchNotificationById($id) attempt ${attempt + 1} failed: $e',
+        );
+        if (attempt < maxAttempts - 1) {
+          final waitMs = 300 * (1 << attempt);
+          await Future.delayed(Duration(milliseconds: waitMs));
+          continue;
+        }
+        return null;
       }
-      if (response.statusCode == 404) return null;
-      throw Exception('Failed to fetch notification: ${response.statusCode}');
-    } catch (_) {
-      return null;
     }
+
+    return null;
   }
 
   Future<List<NotificationModel>> getStaticNotifications() async {

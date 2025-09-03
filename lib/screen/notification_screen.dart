@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../screen/bloc/notificaiton_bloc.dart';
+import '../screen/bloc/notification_event.dart';
+import '../screen/bloc/notification_state.dart';
 import '../screen/bloc/notification_repository.dart';
 import '../model/notification_model.dart';
 import '../utils/snack_helper.dart';
@@ -14,6 +18,7 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   final _repo = NotificationRepository();
+  late final NotificaitonBloc _bloc;
   List<NotificationModel> _notifications = [];
   bool _isLoading = false;
   String? _error;
@@ -22,6 +27,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
   @override
   void initState() {
     super.initState();
+    _bloc = NotificaitonBloc(_repo);
+    // Kick off initial load via the bloc
     _loadNotifications();
   }
 
@@ -30,20 +37,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
       _isLoading = true;
       _error = null;
     });
-    try {
-      final items = await _repo.fetchNotifications();
-      setState(() {
-        _notifications = items;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Failed to load notifications';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    // Ask the bloc to load notifications. A BlocListener in build()
+    // will sync the resulting NotificationLoaded/NotificationError
+    // into this widget's state.
+    _bloc.add(LoadNotificationsEvent());
   }
 
   Future<void> _refresh() async => _loadNotifications();
@@ -182,6 +179,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _bloc.close();
+    _repo.dispose();
+    super.dispose();
+  }
+
   // simple snack types for consistent appearances
   // (SnackType is provided by snack_helper)
   List<NotificationModel> get _filtered {
@@ -198,168 +202,199 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final filtered = _filtered;
     final unreadCount = _notifications.where((n) => !n.isRead).length;
 
-    return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        toolbarHeight: 92,
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        title: const Text('Notifications'),
-        centerTitle: false,
-        actions: [
-          IconButton(
-            onPressed: _markAllRead,
-            icon: const Icon(Icons.mark_email_read_outlined),
-            tooltip: 'Mark all read',
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
-          child: AppSearchBar(
-            query: _query,
-            onChanged: (v) => setState(() => _query = v),
-            onRefresh: _refresh,
+    return BlocListener<NotificaitonBloc, NotificationState>(
+      bloc: _bloc,
+      listener: (context, state) {
+        if (state is NotificationLoading) {
+          setState(() {
+            _isLoading = true;
+            _error = null;
+          });
+        } else if (state is NotificationLoaded) {
+          setState(() {
+            _isLoading = false;
+            _notifications = state.notifications;
+            _error = null;
+          });
+          // If repo fell back to offline/static data, notify the user subtly
+          if (state.isUsingOfflineData) {
+            showAppSnack(
+              context,
+              'Offline: showing demo notifications',
+              type: SnackType.info,
+              duration: const Duration(seconds: 2),
+            );
+          }
+        } else if (state is NotificationError) {
+          setState(() {
+            _isLoading = false;
+            _error = state.message;
+          });
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          elevation: 0,
+          toolbarHeight: 92,
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          title: const Text('Notifications'),
+          centerTitle: false,
+          actions: [
+            IconButton(
+              onPressed: _markAllRead,
+              icon: const Icon(Icons.mark_email_read_outlined),
+              tooltip: 'Mark all read',
+            ),
+          ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(52),
+            child: AppSearchBar(
+              query: _query,
+              onChanged: (v) => setState(() => _query = v),
+              onRefresh: _refresh,
+            ),
           ),
         ),
-      ),
-      body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 74,
-                        color: Colors.red[400],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                      const SizedBox(height: 14),
-                      ElevatedButton.icon(
-                        onPressed: _loadNotifications,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            : RefreshIndicator(
-                onRefresh: _refresh,
-                edgeOffset: 8,
-                child: filtered.isEmpty
-                    ? ListView(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 40,
-                          horizontal: 24,
+        body: SafeArea(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 74,
+                          color: Colors.red[400],
                         ),
-                        children: [
-                          AnimatedOpacity(
-                            opacity: 1,
-                            duration: const Duration(milliseconds: 350),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  Icons.notifications_off_outlined,
-                                  size: 72,
-                                  color: Colors.grey[400],
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  unreadCount == 0
-                                      ? 'No notifications'
-                                      : 'No results',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    color: Colors.grey[800],
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  unreadCount == 0
-                                      ? 'You have caught up — there are no notifications right now.'
-                                      : 'Try changing your search',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(color: Colors.grey[600]),
-                                ),
-                                const SizedBox(height: 18),
-                                if (unreadCount > 0)
-                                  ElevatedButton.icon(
-                                    onPressed: _markAllRead,
-                                    icon: const Icon(
-                                      Icons.mark_email_read_outlined,
-                                    ),
-                                    label: const Text('Mark all read'),
-                                  ),
-                              ],
-                            ),
+                        const SizedBox(height: 14),
+                        Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                        const SizedBox(height: 14),
+                        ElevatedButton.icon(
+                          onPressed: _loadNotifications,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _refresh,
+                  edgeOffset: 8,
+                  child: filtered.isEmpty
+                      ? ListView(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 40,
+                            horizontal: 24,
                           ),
-                        ],
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.only(top: 12, bottom: 20),
-                        itemCount: filtered.length + 1,
-                        itemBuilder: (context, index) {
-                          if (index == 0) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              child: Row(
+                          children: [
+                            AnimatedOpacity(
+                              opacity: 1,
+                              duration: const Duration(milliseconds: 350),
+                              child: Column(
                                 children: [
-                                  Chip(
-                                    label: Text('$unreadCount unread'),
-                                    backgroundColor: Colors.deepPurple
-                                        .withAlpha(20),
+                                  Icon(
+                                    Icons.notifications_off_outlined,
+                                    size: 72,
+                                    color: Colors.grey[400],
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(height: 16),
                                   Text(
-                                    '${_notifications.length} total',
-                                    style: TextStyle(color: Colors.grey[700]),
+                                    unreadCount == 0
+                                        ? 'No notifications'
+                                        : 'No results',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      color: Colors.grey[800],
+                                    ),
                                   ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    unreadCount == 0
+                                        ? 'You have caught up — there are no notifications right now.'
+                                        : 'Try changing your search',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.grey[600]),
+                                  ),
+                                  const SizedBox(height: 18),
+                                  if (unreadCount > 0)
+                                    ElevatedButton.icon(
+                                      onPressed: _markAllRead,
+                                      icon: const Icon(
+                                        Icons.mark_email_read_outlined,
+                                      ),
+                                      label: const Text('Mark all read'),
+                                    ),
                                 ],
                               ),
+                            ),
+                          ],
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(top: 12, bottom: 20),
+                          itemCount: filtered.length + 1,
+                          itemBuilder: (context, index) {
+                            if (index == 0) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Chip(
+                                      label: Text('$unreadCount unread'),
+                                      backgroundColor: Colors.deepPurple
+                                          .withAlpha(20),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '${_notifications.length} total',
+                                      style: TextStyle(color: Colors.grey[700]),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                            final n = filtered[index - 1];
+                            return Dismissible(
+                              key: ValueKey('notif-${n.id}'),
+                              direction: DismissDirection.endToStart,
+                              background: Container(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                child: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              onDismissed: (_) => _deleteNotification(n.id),
+                              child: NotificationCard(
+                                notification: n,
+                                onMarkRead: _markAsRead,
+                                onDelete: _deleteNotification,
+                              ),
                             );
-                          }
-                          final n = filtered[index - 1];
-                          return Dismissible(
-                            key: ValueKey('notif-${n.id}'),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              child: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.white,
-                              ),
-                            ),
-                            onDismissed: (_) => _deleteNotification(n.id),
-                            child: NotificationCard(
-                              notification: n,
-                              onMarkRead: _markAsRead,
-                              onDelete: _deleteNotification,
-                            ),
-                          );
-                        },
-                      ),
-              ),
+                          },
+                        ),
+                ),
+        ),
       ),
     );
   }

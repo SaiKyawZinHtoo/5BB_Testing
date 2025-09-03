@@ -108,9 +108,12 @@ class _NotificationCardState extends State<NotificationCard> {
                           // popup menu
                           PopupMenuButton<String>(
                             onSelected: (v) {
-                              if (v == 'mark') widget.onMarkRead(n.id);
-                              if (v == 'delete' && widget.onDelete != null)
+                              if (v == 'mark') {
+                                widget.onMarkRead(n.id);
+                              }
+                              if (v == 'delete' && widget.onDelete != null) {
                                 widget.onDelete!(n.id);
+                              }
                             },
                             itemBuilder: (context) => [
                               const PopupMenuItem(
